@@ -15,23 +15,33 @@ DEST_SSL  = true
 DEST_USER = 'uname@domain'
 DEST_PASS = 'passwd'
 
+UID_BLOCK_SIZE = 1024 # max number of messages to select at once
+
 # Mapping of source folders to destination folders. The key is the name of the
 # folder on the source server, the value is the name on the destination server.
 # Any folder not specified here will be ignored. If a destination folder does
 # not exist, it will be created.
 FOLDERS = {
   'INBOX' => 'INBOX',
-  'Travel' => 'Travel',
-  'sourcefolder' => 'destinationfolder'
+  '[Gmail]/Sent Mail' => '[Gmail]/Sent Mail',
+  '[Gmail]/All Mail' => '[Gmail]/All Mail'
 }
 
 # Utility methods.
 def dd(message)
-   puts "[#{DEST_HOST}] #{message}"
+   puts "[#{DEST_HOST}: #{DEST_USER}] #{message}"
 end
 
 def ds(message)
-   puts "[#{SOURCE_HOST}] #{message}"
+   puts "[#{SOURCE_HOST}: #{SOURCE_USER}] #{message}"
+end
+
+def uid_fetch_block(server, uids, *args)
+  pos = 0
+  while pos < uids.size
+    server.uid_fetch(uids[pos, UID_BLOCK_SIZE], *args).each { |data| yield data }
+    pos += UID_BLOCK_SIZE
+  end
 end
 
 # Connect and log into both servers.
@@ -78,16 +88,18 @@ FOLDERS.each do |source_folder, dest_folder|
   
   dd 'analyzing existing messages...'
   uids = dest.uid_search(['ALL'])
+  dd "found #{uids.length} messages"
   if uids.length > 0
-    dest.uid_fetch(uids, ['ENVELOPE']).each do |data|
+    uid_fetch_block(dest, uids, ['ENVELOPE']) do |data|
       dest_info[data.attr['ENVELOPE'].message_id] = true
     end
   end
   
   # Loop through all messages in the source folder.
   uids = source.uid_search(['ALL'])
+  ds "found #{uids.length} messages"
   if uids.length > 0
-    source.uid_fetch(uids, ['ENVELOPE']).each do |data|
+    uid_fetch_block(source, uids, ['ENVELOPE']) do |data|
       mid = data.attr['ENVELOPE'].message_id
 
       # If this message is already in the destination folder, skip it.
@@ -101,8 +113,15 @@ FOLDERS.each do |source_folder, dest_folder|
       # Append the message to the destination folder, preserving flags and
       # internal timestamp.
       dd "storing message #{mid}..."
-      dest.append(dest_folder, msg.attr['RFC822'], msg.attr['FLAGS'],
-          msg.attr['INTERNALDATE'])
+      success = false
+      begin
+        dest.append(dest_folder, msg.attr['RFC822'], msg.attr['FLAGS'], msg.attr['INTERNALDATE'])
+        success = true
+      rescue Net::IMAP::NoResponseError => e
+        puts "Got exception: #{e.message}. Retrying..."
+        sleep 1
+      end until success
+
     end
   end
   
