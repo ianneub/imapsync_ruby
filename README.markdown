@@ -1,4 +1,4 @@
-# imapsync_ruby
+# imapsync\_ruby
 
 This is a small program that will help copy messages from one IMAP folder to another, even across servers. It makes it really easy for example to migrate from one gmail account to another, and it has also been tested with many different IMAP servers.
 
